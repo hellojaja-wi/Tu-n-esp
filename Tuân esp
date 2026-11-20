@@ -1,0 +1,227 @@
+_G.FriendColor = Color3.fromRGB(0, 170, 255) -- Màu đồng đội (Xanh dương)
+_G.EnemyColor = Color3.fromRGB(255, 0, 0)    -- Màu kẻ địch dự phòng (Đỏ)
+_G.UseTeamColor = false                      -- Đặt true nếu muốn đồng đội dùng màu Team mặc định của game
+_G.RainbowEnemy = true                       -- Bật hiệu ứng cầu vồng cho Kẻ địch
+_G.RainbowAll = false                        -- Đặt true nếu muốn cả đồng đội cũng đổi màu cầu vồng
+
+--------------------------------------------------------------------
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+
+-- Xóa bản ESP cũ nếu chạy lại script để tránh trùng lặp
+if game.CoreGui:FindFirstChild("ESP") then
+	game.CoreGui.ESP:Destroy()
+end
+
+local Holder = Instance.new("Folder", game.CoreGui)
+Holder.Name = "ESP"
+
+local Box = Instance.new("BoxHandleAdornment")
+Box.Name = "nilBox"
+Box.Size = Vector3.new(1, 2, 1)
+Box.Color3 = Color3.new(100 / 255, 100 / 255, 100 / 255)
+Box.Transparency = 0.7
+Box.ZIndex = 0
+Box.AlwaysOnTop = false
+Box.Visible = false
+
+local NameTag = Instance.new("BillboardGui")
+NameTag.Name = "nilNameTag"
+NameTag.Enabled = false
+NameTag.Size = UDim2.new(0, 200, 0, 50)
+NameTag.AlwaysOnTop = true
+NameTag.StudsOffset = Vector3.new(0, 1.8, 0)
+
+local Tag = Instance.new("TextLabel", NameTag)
+Tag.Name = "Tag"
+Tag.BackgroundTransparency = 1
+Tag.Position = UDim2.new(0, -50, 0, 0)
+Tag.Size = UDim2.new(0, 300, 0, 20)
+Tag.TextSize = 15
+Tag.TextColor3 = Color3.new(100 / 255, 100 / 255, 100 / 255)
+Tag.TextStrokeColor3 = Color3.new(0, 0, 0)
+Tag.TextStrokeTransparency = 0.3
+Tag.Text = "nil"
+Tag.Font = Enum.Font.SourceSansBold
+Tag.TextScaled = false
+
+-- Hàm kiểm tra đồng đội hay kẻ địch
+local function isTeammate(target)
+	if not LocalPlayer or not target then return false end
+	if LocalPlayer.Neutral or target.Neutral then
+		return false -- Chế độ Free-For-All (không chia team) thì coi tất cả là kẻ địch
+	end
+	if LocalPlayer.Team ~= nil and target.Team ~= nil then
+		return LocalPlayer.Team == target.Team
+	end
+	return LocalPlayer.TeamColor == target.TeamColor
+end
+
+-- Hàm tính màu hiển thị cho từng người chơi
+local function getESPColor(target, rainbowColor)
+	local teammate = isTeammate(target)
+	if _G.RainbowAll then
+		return rainbowColor, teammate
+	end
+	if teammate then
+		local col = _G.UseTeamColor and target.TeamColor.Color or _G.FriendColor
+		return col, true
+	else
+		local col = _G.RainbowEnemy and rainbowColor or (_G.UseTeamColor and target.TeamColor.Color or _G.EnemyColor)
+		return col, false
+	end
+end
+
+local UnloadCharacter = function(v)
+	local vHolder = Holder:FindFirstChild(v.Name)
+	if vHolder then
+		vHolder:ClearAllChildren()
+	end
+end
+
+local LoadCharacter = function(v)
+	if v == LocalPlayer then return end
+	repeat task.wait() until v.Character ~= nil
+	local hum = v.Character:WaitForChild("Humanoid", 5)
+	if not hum then return end
+
+	local vHolder = Holder:FindFirstChild(v.Name)
+	if not vHolder then return end
+	vHolder:ClearAllChildren()
+
+	local b = Box:Clone()
+	b.Name = v.Name .. "Box"
+	b.Adornee = v.Character
+	b.Parent = vHolder
+
+	local t = NameTag:Clone()
+	t.Name = v.Name .. "NameTag"
+	t.Enabled = true
+	t.Parent = vHolder
+	t.Adornee = v.Character:WaitForChild("Head", 5)
+	if not t.Adornee then
+		return UnloadCharacter(v)
+	end
+
+	local initialColor, teammate = getESPColor(v, Color3.fromHSV(0, 1, 1))
+	t.Tag.Text = (teammate and "[TEAM] " or "[ENEMY] ") .. v.Name
+	b.Color3 = initialColor
+	t.Tag.TextColor3 = initialColor
+
+	local Update
+	local UpdateNameTag = function()
+		if not pcall(function()
+			v.Character.Humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+		end) then
+			if Update then Update:Disconnect() end
+		end
+	end
+	UpdateNameTag()
+	Update = v.Character.Humanoid.Changed:Connect(UpdateNameTag)
+end
+
+local LoadPlayer = function(v)
+	if v == LocalPlayer then return end
+	local vHolder = Instance.new("Folder", Holder)
+	vHolder.Name = v.Name
+
+	v.CharacterAdded:Connect(function()
+		pcall(LoadCharacter, v)
+	end)
+	v.CharacterRemoving:Connect(function()
+		pcall(UnloadCharacter, v)
+	end)
+	v.Changed:Connect(function(prop)
+		if prop == "TeamColor" or prop == "Team" then
+			UnloadCharacter(v)
+			task.wait()
+			pcall(LoadCharacter, v)
+		end
+	end)
+	pcall(LoadCharacter, v)
+end
+
+local UnloadPlayer = function(v)
+	UnloadCharacter(v)
+	local vHolder = Holder:FindFirstChild(v.Name)
+	if vHolder then
+		vHolder:Destroy()
+	end
+end
+
+for _, v in pairs(Players:GetPlayers()) do
+	task.spawn(function()
+		pcall(LoadPlayer, v)
+	end)
+end
+
+Players.PlayerAdded:Connect(function(v)
+	pcall(LoadPlayer, v)
+end)
+
+Players.PlayerRemoving:Connect(function(v)
+	pcall(UnloadPlayer, v)
+end)
+
+-- Cập nhật lại toàn bộ ESP nếu chính bạn đổi Team
+LocalPlayer:GetPropertyChangedSignal("Team"):Connect(function()
+	for _, v in pairs(Players:GetPlayers()) do
+		if v ~= LocalPlayer then
+			UnloadCharacter(v)
+			task.spawn(function()
+				pcall(LoadCharacter, v)
+			end)
+		end
+	end
+end)
+
+LocalPlayer.NameDisplayDistance = 0
+
+local function applyHighlight(target, color)
+	if target.Character then
+		local highlight = target.Character:FindFirstChild("GetReal")
+		if not highlight then
+			highlight = Instance.new("Highlight")
+			highlight.RobloxLocked = true
+			highlight.Name = "GetReal"
+			highlight.Adornee = target.Character
+			highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+			highlight.FillTransparency = 0.5
+			highlight.OutlineTransparency = 0
+			highlight.FillColor = color
+			highlight.OutlineColor = color
+			highlight.Parent = target.Character
+		else
+			highlight.FillColor = color
+			highlight.OutlineColor = color
+		end
+	end
+end
+
+-- Vòng lặp cập nhật màu cầu vồng & phân biệt Team theo từng khung hình
+local hue = 0
+RunService.RenderStepped:Connect(function(dt)
+	hue = (hue + dt * 0.35) % 1
+	local rainbowColor = Color3.fromHSV(hue, 1, 1)
+
+	for _, v in pairs(Players:GetPlayers()) do
+		if v ~= LocalPlayer then
+			local color, teammate = getESPColor(v, rainbowColor)
+			applyHighlight(v, color)
+
+			local vHolder = Holder:FindFirstChild(v.Name)
+			if vHolder then
+				local b = vHolder:FindFirstChild(v.Name .. "Box")
+				if b then
+					b.Color3 = color
+				end
+				local t = vHolder:FindFirstChild(v.Name .. "NameTag")
+				if t and t:FindFirstChild("Tag") then
+					t.Tag.TextColor3 = color
+					t.Tag.Text = (teammate and "[TEAM] " or "[ENEMY] ") .. v.Name
+				end
+			end
+		end
+	end
+end)
